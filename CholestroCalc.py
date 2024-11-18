@@ -3,6 +3,7 @@ import os
 import json
 import numpy as np
 import pandas as pd
+import joblib  # For loading the model
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QMenuBar, QMenu, QAction,
                             QFileDialog, QComboBox, QLabel, QGroupBox, QSpinBox,
@@ -15,6 +16,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 import pspython.pspyinstruments as pspyinstruments
 import pspython.pspymethods as pspymethods
+from calibration_model import CalibrationModel
 
 class ParameterGroup(QGroupBox):
     def __init__(self, title, parameters):
@@ -57,6 +59,8 @@ class ElectrochemicalApp(QMainWindow):
         self.measurement_type = None
         
         self.setup_ui()
+        self.model, self.poly, self.scaler = self.load_model()
+        self.calibration_model = CalibrationModel(degree=2)  # Instantiate the CalibrationModel
         
     def setup_ui(self):
         # Create menu bar
@@ -73,6 +77,8 @@ class ElectrochemicalApp(QMainWindow):
         
         # Create left panel
         left_panel = self.create_left_panel()
+        
+     
         
         # Create right panel with tabs
         right_panel = self.create_right_panel()
@@ -155,13 +161,28 @@ class ElectrochemicalApp(QMainWindow):
         
         # Control buttons
         control_group = QGroupBox("Control")
-        control_layout = QVBoxLayout()
+        control_layout = QVBoxLayout()  # Ensure control_layout is defined here
         self.start_btn = QPushButton("Start Measurement")
         self.start_btn.clicked.connect(self.start_measurement)
         self.stop_btn = QPushButton("Stop")
         self.stop_btn.clicked.connect(self.stop_measurement)
+        
         control_layout.addWidget(self.start_btn)
         control_layout.addWidget(self.stop_btn)
+        self.generate_test_scan_btn = QPushButton("Generate Test Scan")
+        self.generate_test_scan_btn.clicked.connect(self.start_test)  # Connect to the method that generates test data
+        control_layout.addWidget(self.generate_test_scan_btn)
+        control_group.setLayout(control_layout)
+
+        # Add Get Results button (existing)
+        self.get_results_btn = QPushButton("Get Results")
+        self.get_results_btn.clicked.connect(self.predict_concentration)  # Existing model
+        control_layout.addWidget(self.get_results_btn)
+
+        self.get_calculated_results_btn = QPushButton("Get Calculated Results")
+        self.get_calculated_results_btn.clicked.connect(self.get_calculated_results)  # Connect to the new method
+        control_layout.addWidget(self.get_calculated_results_btn)
+        
         control_group.setLayout(control_layout)
         
         # Add all groups to left panel
@@ -172,7 +193,6 @@ class ElectrochemicalApp(QMainWindow):
         left_layout.addStretch()
         
         return left_panel
-    
     def create_right_panel(self):
         tab_widget = QTabWidget()
         
@@ -229,7 +249,7 @@ class ElectrochemicalApp(QMainWindow):
                 "Equilibration Time (s)": (0.0, 1000.0, 0.0, 1.0),
                 "Interval Time (s)": (0.001, 10.0, 0.1, 0.001),
                 "Potential (V)": (-2.0, 2.0, 0.0, 0.1),
-                "Run Time (s)": (0.1, 1000.0, 1.0, 0.1)
+                " Run Time (s)": (0.1, 1000.0, 1.0, 0.1)
             },
             "EIS": {
                 "DC Potential (V)": (-2.0, 2.0, 0.0, 0.1),
@@ -320,6 +340,37 @@ class ElectrochemicalApp(QMainWindow):
                     self.statusBar.showMessage("Error disconnecting")
         except Exception as e:
             self.statusBar.showMessage(f"Connection error: {str(e)}")
+    def get_peak_current_value(self, voltage):
+   
+        if not self.current_data['voltage'] or not self.current_data['current']:
+            return None
+        
+        for i, v in enumerate(self.current_data['voltage']):
+            if abs(v - voltage) < 1e-4:  # Check if voltage is close to the target
+                return self.current_data['current'][i]
+        return None   
+    def predict_concentration(self):
+        # Ensure there is data to predict
+        if not self.current_data['voltage'] or not self.current_data['current']:
+            self.statusBar.showMessage("No data available for prediction.")
+            return
+        
+        # Get the peak current value at -0.50017 V
+        peak_current_value = self.get_peak_current_value(-0.50017)
+        
+        if peak_current_value is None:
+            self.statusBar.showMessage("No peak current found at -0.50017 V.")
+            return
+        
+        # Prepare features for prediction
+        scan_features = self.poly.transform([[ -0.50017, peak_current_value ]])
+        scan_features = self.scaler.transform(scan_features)
+        
+        # Predict concentration using the model
+        concentration_pred = self.model.predict(scan_features)
+        
+        # Display the predicted concentration
+        self.statusBar.showMessage(f"Predicted Concentration: {concentration_pred[0]:.4f} nM")     
 
     def start_measurement(self):
         try:
@@ -378,6 +429,51 @@ class ElectrochemicalApp(QMainWindow):
         except Exception as e:
             self.statusBar.showMessage(f"Error stopping measurement: {str(e)}")
 
+    def start_test(self):
+        # Simulated DPV data
+        voltage = [
+            -0.50017, -0.489963, -0.479755, -0.469548, -0.45934, -0.449133, -0.438925,
+            -0.428717, -0.41851, -0.408302, -0.398095, -0.387887, -0.37768, -0.367472,
+            -0.357264, -0.347057, -0.336849, -0.326642, -0.316434, -0.306227, -0.296019,
+            -0.285811, -0.275604, -0.265396, -0.255189, -0.244981, -0.234774, -0.224566,
+            -0.214358, -0.204151, -0.193943, -0.183736, -0.173528, -0.163321, -0.153113,
+            -0.142905, -0.132698, -0.12249, -0.112283, -0.102075, -0.0918681, -0.0816606,
+            -0.071453, -0.0612454, -0.0510379, -0.0408303, -0.0306227, -0.0204151,
+            -0.0102076, 0, 0.0102076, 0.0204151, 0.0306227, 0.0408303, 0.0510379,
+            0.0612454, 0.071453, 0.0816606, 0.0918681, 0.102075, 0.112283, 0.12249,
+            0.132698, 0.142905, 0.153113, 0.163321, 0.173528, 0.183736, 0.193943,
+            0.204151, 0.214358, 0.224566, 0.234774, 0.244981, 0.255189, 0.265396,
+            0.275604, 0.285811, 0.296019, 0.306227, 0.316434, 0.326642, 0.336849,
+            0.347057, 0.357264, 0.367472, 0.37768, 0.387887, 0.398095, 0.408302,
+            0.41851, 0.428717, 0.438925, 0.449133, 0.45934, 0.469548, 0.479755,
+            0.489963, 0.50017
+        ]
+        
+        current = [
+            32.7599, 27.8319, 24.6959, 22.5679, 20.9999, 19.4039, 17.9479, 17.0519,
+            15.9879, 14.7839, 14.0559, 13.4399, 12.8659, 12.4459, 12.2079, 11.7599,
+            11.1859, 10.99, 10.703, 9.97496, 10.094, 9.92596, 9.63196, 9.35896,
+            9.33796, 9.19446, 8.95646, 8.96346, 8.91796, 8.75346, 8.71496, 8.50496,
+            8.46646, 8.69396, 8.85846, 8.92496, 8.91096, 9.14196, 9.39746, 9.59346,
+            9.93646, 10.4562, 10.9392, 11.4467, 12.2587, 13.0724, 13.8704, 14.9099, 
+            16.0054, 17.0134, 18.0354, 19.1974, 20.1879, 21.0069, 22.0604, 22.9179,
+            23.4639, 24.1079, 24.6854, 24.8254, 24.6679, 23.9294, 23.6949, 22.2704,
+            21.1014, 19.6489, 17.9374, 16.5094, 15.3299, 14.1749, 13.1774, 12.7312,
+            12.3182, 11.6024, 11.8509, 11.8422, 11.7284, 11.7442, 11.9297, 12.0242,
+            11.7949, 12.3917, 12.6262, 12.4722, 13.0637, 13.4382, 13.7024, 14.0034,
+            14.4882, 14.8434, 15.0359, 15.5522, 15.9739, 16.2434, 16.6739, 17.2129,
+            17.5699, 17.8989, 18.5254
+        ]
+        
+
+        
+        self.current_data = {'voltage': voltage, 'current': current}
+    
+        # Update plot and data display
+        self.update_plot()
+        self.update_data_display()
+        self.statusBar.showMessage("Test data generated")
+
     def save_data(self):
         try:
             filename, _ = QFileDialog.getSaveFileName(
@@ -418,7 +514,7 @@ class ElectrochemicalApp(QMainWindow):
             )
             if filename:
                 self.figure.savefig(filename, dpi=300, bbox_inches='tight')
-                self.statusBar.showMessage(f"Plot exported to {filename}")
+                self.statusBar.showMessage(f" Plot exported to {filename}")
         except Exception as e:
             self.statusBar.showMessage(f"Error exporting plot: {str(e)}")
 
@@ -466,6 +562,45 @@ class ElectrochemicalApp(QMainWindow):
         except Exception as e:
             print(f"Error during shutdown: {str(e)}")
             event.accept()
+    def load_model(self):
+    # Load the trained model, polynomial features, and scaler
+        model = joblib.load('stacking_model.pkl')  # Ensure this file is in the same directory as main.py
+        poly = joblib.load('poly.pkl')
+        scaler = joblib.load('scaler.pkl')
+        return model, poly, scaler        
+    def predict_concentration(self):
+    # Ensure there is data to predict
+        if not self.current_data['voltage'] or not self.current_data['current']:
+            self.statusBar.showMessage("No data available for prediction.")
+            return
+       
+        latest_voltage = np.mean(self.current_data['voltage'])
+        latest_current = np.mean(self.current_data['current'])
+        
+        # Prepare features for prediction as a DataFrame
+        features = pd.DataFrame([[latest_voltage, latest_current]], columns=['Voltage', 'Current'])
+        
+        # Transform features for prediction
+        scan_features = self.poly.transform(features)
+        scan_features = self.scaler.transform(scan_features)
+        
+        # Predict concentration using the model
+        concentration_pred = self.model.predict(scan_features)
+        
+        # Display the predicted concentration
+        self.statusBar.showMessage(f"Predicted Concentration: {concentration_pred[0]:.4f} nM")
+    def get_calculated_results(self):
+    # Get the current value at -0.50017 V
+        peak_current_value = self.get_peak_current_value(-0.50017)
+        if peak_current_value is None:
+            self.statusBar.showMessage("No peak current found at -0.50017 V.")
+            return
+        
+        # Use the calibration model to predict concentration
+        concentration_pred = self.calibration_model.predict_concentration(peak_current_value)
+        
+        # Display the predicted concentration
+        self.statusBar.showMessage(f"Calculated Concentration from Test Scan: {concentration_pred:.4f} nM")
 
 def main():
     try:
