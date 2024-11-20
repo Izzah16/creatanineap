@@ -58,6 +58,8 @@ class ElectrochemicalApp(QMainWindow):
         # Add measurement type selection
         self.measurement_type = None
         
+        self.measurement_in_progress = False
+        
         self.setup_ui()
         self.model, self.poly, self.scaler = self.load_model()
         self.calibration_model = CalibrationModel(degree=2)  # Instantiate the CalibrationModel
@@ -117,6 +119,23 @@ class ElectrochemicalApp(QMainWindow):
         
         tools_menu.addAction(calibrate_action)
         tools_menu.addAction(analyze_action)
+    def start_new_measurement(self):
+        # Prompt user to save current scan data
+        reply = QMessageBox.question(self, "Save Data",
+                                     "Do you want to save the current scan data?",
+                                     QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                     QMessageBox.Cancel)
+        
+        if reply == QMessageBox.Yes:
+            self.save_data()  # Call the save_data method to save the current data
+        elif reply == QMessageBox.Cancel:
+            return  # If user cancels, do nothing and return
+
+        # Clear previous data
+        self.current_data = {'voltage': [], 'current': []}
+        self.update_plot()  # Update the plot to reflect the cleared data
+        self.update_data_display()  # Clear the data display
+        self.statusBar.showMessage("Ready for new measurement")    
         
     def create_left_panel(self):
         left_panel = QWidget()
@@ -173,6 +192,10 @@ class ElectrochemicalApp(QMainWindow):
         self.generate_test_scan_btn.clicked.connect(self.start_test)  # Connect to the method that generates test data
         control_layout.addWidget(self.generate_test_scan_btn)
         control_group.setLayout(control_layout)
+
+        self.start_new_measurement_btn = QPushButton("Start New Measurement")
+        self.start_new_measurement_btn.clicked.connect(self.start_new_measurement)
+        control_layout.addWidget(self.start_new_measurement_btn)
 
         # Add Get Results button (existing)
         self.get_results_btn = QPushButton("Get Results")
@@ -355,25 +378,30 @@ class ElectrochemicalApp(QMainWindow):
             self.statusBar.showMessage("No data available for prediction.")
             return
         
-        # Get the peak current value at -0.50017 V
-        peak_current_value = self.get_peak_current_value(-0.50017)
+        
+        peak_current_value = self.get_peak_current_value(0.102075)
         
         if peak_current_value is None:
-            self.statusBar.showMessage("No peak current found at -0.50017 V.")
+            self.statusBar.showMessage("No peak current found at 0.102075 V.")
             return
         
         # Prepare features for prediction
-        scan_features = self.poly.transform([[ -0.50017, peak_current_value ]])
+        scan_features = self.poly.transform([[0.102075, peak_current_value ]])
         scan_features = self.scaler.transform(scan_features)
         
         # Predict concentration using the model
         concentration_pred = self.model.predict(scan_features)
         
         # Display the predicted concentration
-        self.statusBar.showMessage(f"Predicted Concentration: {concentration_pred[0]:.4f} nM")     
+        QMessageBox.information(self, "Prediction Result", f"Predicted Concentration: {concentration_pred[0]:.4f} nM")     
 
     def start_measurement(self):
         try:
+            # Check if the instrument is connected
+            if not self.manager.is_connected ():
+                self.statusBar.showMessage("Instrument is not connected.")
+                return
+
             params = self.parameters_group.get_values()
             
             if self.measurement_type == "DPV":
@@ -394,7 +422,7 @@ class ElectrochemicalApp(QMainWindow):
                     equilibration_time=params["Equilibration Time (s)"],
                     interval_time=params["Interval Time (s)"],
                     e=params["Potential (V)"],
-                    run_time=params["Run Time (s)"]
+                    run_time=params["Run Time (s)"]  # Ensure this matches the expected parameter
                 )
             elif self.measurement_type == "EIS":
                 method = pspymethods.electrochemical_impedance_spectroscopy(
@@ -422,25 +450,54 @@ class ElectrochemicalApp(QMainWindow):
 
     def stop_measurement(self):
         try:
-            self.manager.disconnect()
-            self.statusBar.showMessage("Measurement stopped")
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
+            if self.measurement_in_progress:
+                # Here, you can stop the measurement by managing the state
+                self.manager.disconnect()  # Disconnecting to stop the measurement
+                self.statusBar.showMessage("Measurement stopped")
+                self.start_btn.setEnabled(True)
+                self.stop_btn.setEnabled(False)  # Disable stop button since measurement has stopped
+                self.measurement_in_progress = False  # Reset the flag
+            else:
+                self.statusBar.showMessage("No measurement is currently in progress.")
         except Exception as e:
             self.statusBar.showMessage(f"Error stopping measurement: {str(e)}")
+    # Add this method to the ElectrochemicalApp class
+    def start_new_measurement(self):
+    # Prompt user to save current scan data
+        reply = QMessageBox.question(self, "Save Data",
+                                    "Do you want to save the current scan data?",
+                                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                    QMessageBox.Cancel)
+        
+        if reply == QMessageBox.Yes:
+            self.save_data()  # Call the save_data method to save the current data
+        elif reply == QMessageBox.Cancel:
+            return  # If user cancels, do nothing and return
+
+        # Clear previous data
+        self.current_data = {'voltage': [], 'current': []}
+        self.update_plot()  # Update the plot to reflect the cleared data
+        self.update_data_display()  # Clear the data display
+        self.statusBar.showMessage("Ready for new measurement")
+
+        # Reset button states
+        self.start_btn.setEnabled(True)
+        self.stop_btn.setEnabled(False)  # Disable stop button since no measurement is ongoing
+
+        # In the create_left_panel method, add the new button
+             
 
     def start_test(self):
-        # Simulated DPV data
         voltage = [
             -0.50017, -0.489963, -0.479755, -0.469548, -0.45934, -0.449133, -0.438925,
             -0.428717, -0.41851, -0.408302, -0.398095, -0.387887, -0.37768, -0.367472,
             -0.357264, -0.347057, -0.336849, -0.326642, -0.316434, -0.306227, -0.296019,
             -0.285811, -0.275604, -0.265396, -0.255189, -0.244981, -0.234774, -0.224566,
             -0.214358, -0.204151, -0.193943, -0.183736, -0.173528, -0.163321, -0.153113,
-            -0.142905, -0.132698, -0.12249, -0.112283, -0.102075, -0.0918681, -0.0816606,
-            -0.071453, -0.0612454, -0.0510379, -0.0408303, -0.0306227, -0.0204151,
-            -0.0102076, 0, 0.0102076, 0.0204151, 0.0306227, 0.0408303, 0.0510379,
-            0.0612454, 0.071453, 0.0816606, 0.0918681, 0.102075, 0.112283, 0.12249,
+            -0.142905, -0.132698, -0.12249, -0.112283, -0.102075, -0.091868136, -0.08166056,
+            -0.071452992, -0.06124542, -0.051037852, -0.04083028, -0.03062271, -0.02041514,
+            -0.01020757, 0, 0.01020757, 0.02041514, 0.03062271, 0.04083028, 0.051037852,
+            0.06124542, 0.071452992, 0.08166056, 0.091868136, 0.102075, 0.112283, 0.12249,
             0.132698, 0.142905, 0.153113, 0.163321, 0.173528, 0.183736, 0.193943,
             0.204151, 0.214358, 0.224566, 0.234774, 0.244981, 0.255189, 0.265396,
             0.275604, 0.285811, 0.296019, 0.306227, 0.316434, 0.326642, 0.336849,
@@ -448,28 +505,24 @@ class ElectrochemicalApp(QMainWindow):
             0.41851, 0.428717, 0.438925, 0.449133, 0.45934, 0.469548, 0.479755,
             0.489963, 0.50017
         ]
-        
-        current = [
-            32.7599, 27.8319, 24.6959, 22.5679, 20.9999, 19.4039, 17.9479, 17.0519,
-            15.9879, 14.7839, 14.0559, 13.4399, 12.8659, 12.4459, 12.2079, 11.7599,
-            11.1859, 10.99, 10.703, 9.97496, 10.094, 9.92596, 9.63196, 9.35896,
-            9.33796, 9.19446, 8.95646, 8.96346, 8.91796, 8.75346, 8.71496, 8.50496,
-            8.46646, 8.69396, 8.85846, 8.92496, 8.91096, 9.14196, 9.39746, 9.59346,
-            9.93646, 10.4562, 10.9392, 11.4467, 12.2587, 13.0724, 13.8704, 14.9099, 
-            16.0054, 17.0134, 18.0354, 19.1974, 20.1879, 21.0069, 22.0604, 22.9179,
-            23.4639, 24.1079, 24.6854, 24.8254, 24.6679, 23.9294, 23.6949, 22.2704,
-            21.1014, 19.6489, 17.9374, 16.5094, 15.3299, 14.1749, 13.1774, 12.7312,
-            12.3182, 11.6024, 11.8509, 11.8422, 11.7284, 11.7442, 11.9297, 12.0242,
-            11.7949, 12.3917, 12.6262, 12.4722, 13.0637, 13.4382, 13.7024, 14.0034,
-            14.4882, 14.8434, 15.0359, 15.5522, 15.9739, 16.2434, 16.6739, 17.2129,
-            17.5699, 17.8989, 18.5254
-        ]
-        
-
-        
+        current =[
+            14.447934, 12.151946, 10.751952, 9.687956, 8.93196, 8.203963, 7.545966, 
+            7.055968, 6.56597, 6.110972, 5.753974, 5.424976, 5.088977, 4.794978, 
+            4.577979, 4.35923, 4.142231, 4.003982, 3.863982, 3.713483, 3.618983, 
+            3.543734, 3.452734, 3.372235, 3.347735, 3.307485, 3.246235, 3.258485, 
+            3.256735, 3.230485, 3.240985, 3.268985, 3.268985, 3.286485, 3.347735, 
+            3.393234, 3.417734, 3.524484, 3.648733, 3.765982, 3.949732, 4.205231, 
+            4.46773, 4.765228, 5.179977, 5.587725, 5.955223, 6.396221, 6.809219, 
+            7.111968, 7.384967, 7.699965, 7.897714, 7.988714, 8.209212, 8.319462, 
+            8.303713, 8.357962, 8.380712, 8.266963, 8.093713, 7.992214, 7.762965, 
+            7.433966, 7.250217, 7.022718, 6.78647, 6.643845, 6.603595, 6.57122, 
+            6.58347, 6.727845, 6.838969, 6.886219, 7.069093, 7.227467, 7.341217, 
+            7.502216, 7.738465, 7.909964, 8.041214, 8.331712, 8.573211, 8.73596, 
+            9.01421, 9.313458, 9.519957, 9.742207, 10.088705, 10.345954, 10.508703, 
+            10.904201, 11.226199, 11.448449, 11.805447, 12.248195, 12.613943, 
+            12.998942, 13.698938
+            ]
         self.current_data = {'voltage': voltage, 'current': current}
-    
-        # Update plot and data display
         self.update_plot()
         self.update_data_display()
         self.statusBar.showMessage("Test data generated")
@@ -588,19 +641,19 @@ class ElectrochemicalApp(QMainWindow):
         concentration_pred = self.model.predict(scan_features)
         
         # Display the predicted concentration
-        self.statusBar.showMessage(f"Predicted Concentration: {concentration_pred[0]:.4f} nM")
+        QMessageBox.information(self, "Prediction Result", f"Predicted Concentration: {concentration_pred[0]:.4f} µM")
     def get_calculated_results(self):
-    # Get the current value at -0.50017 V
-        peak_current_value = self.get_peak_current_value(-0.50017)
+   
+        peak_current_value = self.get_peak_current_value(0.102075)   
         if peak_current_value is None:
-            self.statusBar.showMessage("No peak current found at -0.50017 V.")
+            self.statusBar.showMessage("No peak current found at 0.102075 V.")
             return
         
         # Use the calibration model to predict concentration
         concentration_pred = self.calibration_model.predict_concentration(peak_current_value)
         
         # Display the predicted concentration
-        self.statusBar.showMessage(f"Calculated Concentration from Test Scan: {concentration_pred:.4f} nM")
+        QMessageBox.information(self, "Calculated Concentration", f"Calculated Concentration from Test Scan: {concentration_pred:.4f} µM")
 
 def main():
     try:
