@@ -4,6 +4,7 @@ import json
 import numpy as np
 import pandas as pd
 import joblib  # For loading the model
+from train_model import extract_features
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QPushButton, QMenuBar, QMenu, QAction,
                             QFileDialog, QComboBox, QLabel, QGroupBox, QSpinBox,
@@ -197,10 +198,12 @@ class ElectrochemicalApp(QMainWindow):
         self.start_new_measurement_btn.clicked.connect(self.start_new_measurement)
         control_layout.addWidget(self.start_new_measurement_btn)
 
-        # Add Get Results button (existing)
-        self.get_results_btn = QPushButton("Get Results")
-        self.get_results_btn.clicked.connect(self.predict_concentration)  # Existing model
-        control_layout.addWidget(self.get_results_btn)
+           # Final Button
+        self.final_btn = QPushButton("Show Result")
+        self.final_btn.clicked.connect(self.final_prediction)  # Connect to the new prediction method
+        control_layout.addWidget(self.final_btn)
+
+        control_group.setLayout(control_layout)
 
         self.get_calculated_results_btn = QPushButton("Get Calculated Results")
         self.get_calculated_results_btn.clicked.connect(self.get_calculated_results)  # Connect to the new method
@@ -372,6 +375,37 @@ class ElectrochemicalApp(QMainWindow):
             if abs(v - voltage) < 1e-4:  # Check if voltage is close to the target
                 return self.current_data['current'][i]
         return None   
+    def final_prediction(self):
+        if not self.current_data['voltage'] or not self.current_data['current']:
+            self.statusBar.showMessage("No data available for prediction.")
+            return
+
+        # Create a DataFrame for the current data
+        data = pd.DataFrame({
+            'Voltage': self.current_data['voltage'],
+            'Current': self.current_data['current']
+        })
+
+        # Extract features from the current data
+        features = extract_features(data)
+
+        # Prepare a DataFrame for the features that the model expects
+        feature_array = pd.DataFrame([[features['Peak_Height'], 
+                                        features['Peak_Potential'], 
+                                        features['Area_Under_Curve'], 
+                                        features['Mean_Current'], 
+                                        features['Std_Current'], 
+                                        features['Skew_Current']]], 
+                                    columns=['Peak_Height', 'Peak_Potential', 'Area_Under_Curve', 'Mean_Current', 'Std_Current', 'Skew_Current'])
+
+        # Load the trained model
+        model = joblib.load('rf_model.pkl')
+
+        # Predict concentration using the model
+        concentration_pred = model.predict(feature_array)
+
+        # Display the predicted concentration
+        QMessageBox.information(self, "Final Prediction Result", f"Predicted Concentration: {concentration_pred[0]:.4f} µM")
     def predict_concentration(self):
         # Ensure there is data to predict
         if not self.current_data['voltage'] or not self.current_data['current']:
@@ -521,8 +555,10 @@ class ElectrochemicalApp(QMainWindow):
             9.01421, 9.313458, 9.519957, 9.742207, 10.088705, 10.345954, 10.508703, 
             10.904201, 11.226199, 11.448449, 11.805447, 12.248195, 12.613943, 
             12.998942, 13.698938
-            ]
+        ]
         self.current_data = {'voltage': voltage, 'current': current}
+    
+        # Update plot and data display
         self.update_plot()
         self.update_data_display()
         self.statusBar.showMessage("Test data generated")
@@ -617,7 +653,8 @@ class ElectrochemicalApp(QMainWindow):
             event.accept()
     def load_model(self):
     # Load the trained model, polynomial features, and scaler
-        model = joblib.load('stacking_model.pkl')  # Ensure this file is in the same directory as main.py
+        
+        model = joblib.load('rf_model.pkl')  # Ensure this file is in the same directory as main.py
         poly = joblib.load('poly.pkl')
         scaler = joblib.load('scaler.pkl')
         return model, poly, scaler        
