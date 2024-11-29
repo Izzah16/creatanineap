@@ -205,9 +205,7 @@ class ElectrochemicalApp(QMainWindow):
 
         control_group.setLayout(control_layout)
 
-        self.get_calculated_results_btn = QPushButton("Get Calculated Results")
-        self.get_calculated_results_btn.clicked.connect(self.get_calculated_results)  # Connect to the new method
-        control_layout.addWidget(self.get_calculated_results_btn)
+     
         
         control_group.setLayout(control_layout)
         
@@ -404,8 +402,36 @@ class ElectrochemicalApp(QMainWindow):
         # Predict concentration using the model
         concentration_pred = model.predict(feature_array)
 
-        # Display the predicted concentration
-        QMessageBox.information(self, "Final Prediction Result", f"Predicted Concentration: {concentration_pred[0]:.4f} µM")
+                # Categorize the creatinine level based on the predicted concentration
+# Categorize the creatinine level based on the predicted concentration
+        if 5 <= concentration_pred[0] <= 30:
+            creatinine_level = "Very Low"
+            bg_color = "background-color: lightgreen;"  # Light green for Very Low
+        elif 30 < concentration_pred[0] <= 60:
+            creatinine_level = "Low"
+            bg_color = "background-color: green;"  # Green for Low
+        elif 60 < concentration_pred[0] <= 90:
+            creatinine_level = "Moderate"
+            bg_color = "background-color: yellow;"  # Yellow for Moderate
+        elif 90 < concentration_pred[0] <= 120:
+            creatinine_level = "High"
+            bg_color = "background-color: orange;"  # Orange for High
+        elif 120 < concentration_pred[0] <= 150:
+            creatinine_level = "Very High"
+            bg_color = "background-color: red;"  # Red for Very High
+        else:
+            creatinine_level = "Out of Range"
+            bg_color = "background-color: gray;"  # Gray for Out of Range
+
+        # Display the predicted concentration and creatinine level with background color
+        QMessageBox.information(
+            self, 
+            "Result", 
+            f"Predicted Concentration: {concentration_pred[0]:.4f} µM<br><span style='{bg_color}'>Creatinine Level: {creatinine_level}</span>",
+            QMessageBox.Ok
+        )
+
+
     def predict_concentration(self):
         # Ensure there is data to predict
         if not self.current_data['voltage'] or not self.current_data['current']:
@@ -679,18 +705,8 @@ class ElectrochemicalApp(QMainWindow):
         
         # Display the predicted concentration
         QMessageBox.information(self, "Prediction Result", f"Predicted Concentration: {concentration_pred[0]:.4f} µM")
-    def get_calculated_results(self):
-   
-        peak_current_value = self.get_peak_current_value(0.102075)   
-        if peak_current_value is None:
-            self.statusBar.showMessage("No peak current found at 0.102075 V.")
-            return
-        
-        # Use the calibration model to predict concentration
-        concentration_pred = self.calibration_model.predict_concentration(peak_current_value)
-        
-        # Display the predicted concentration
-        QMessageBox.information(self, "Calculated Concentration", f"Calculated Concentration from Test Scan: {concentration_pred:.4f} µM")
+
+     
 
 def main():
     try:
