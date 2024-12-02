@@ -46,7 +46,7 @@ class ParameterGroup(QGroupBox):
 class ElectrochemicalApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Creatinine Test-By Izzah Batool Javed Mphil Applied Chemistry(2023-2025)")
+        self.setWindowTitle("Electrochemical Sensor Interface-By Izzah Batool Javed MPhil Applied(2023-2025)")
         self.setGeometry(100, 100, 1400, 900)
         
         # Initialize data storage
@@ -64,6 +64,9 @@ class ElectrochemicalApp(QMainWindow):
         self.setup_ui()
         self.model, self.poly, self.scaler = self.load_model()
         self.calibration_model = CalibrationModel(degree=2)  # Instantiate the CalibrationModel
+    def get_color(self, index):
+            colors = ['red', 'blue', 'green', 'orange', 'purple', 'cyan', 'magenta', 'yellow']
+            return colors[index % len(colors)]   
         
     def setup_ui(self):
         # Create menu bar
@@ -178,10 +181,18 @@ class ElectrochemicalApp(QMainWindow):
         
         # Parameters for each technique
         self.parameters_group = self.create_parameter_groups()
+
+        # Dropdown for measurement type
+        self.measurement_type_combo = QComboBox()
+        self.measurement_type_combo.addItems(["New", "Overlay"])
         
         # Control buttons
         control_group = QGroupBox("Control")
         control_layout = QVBoxLayout()  # Ensure control_layout is defined here
+        
+        # Add the measurement type dropdown to the control layout
+        control_layout.addWidget(self.measurement_type_combo)  # Add dropdown to control layout
+        
         self.start_btn = QPushButton("Start Measurement")
         self.start_btn.clicked.connect(self.start_measurement)
         self.stop_btn = QPushButton("Stop")
@@ -189,24 +200,20 @@ class ElectrochemicalApp(QMainWindow):
         
         control_layout.addWidget(self.start_btn)
         control_layout.addWidget(self.stop_btn)
+        
         self.generate_test_scan_btn = QPushButton("Generate Test Scan")
         self.generate_test_scan_btn.clicked.connect(self.start_test)  # Connect to the method that generates test data
         control_layout.addWidget(self.generate_test_scan_btn)
-        control_group.setLayout(control_layout)
-
+        
         self.start_new_measurement_btn = QPushButton("Start New Measurement")
         self.start_new_measurement_btn.clicked.connect(self.start_new_measurement)
         control_layout.addWidget(self.start_new_measurement_btn)
 
-           # Final Button
+        # Final Button
         self.final_btn = QPushButton("Show Result")
         self.final_btn.clicked.connect(self.final_prediction)  # Connect to the new prediction method
         control_layout.addWidget(self.final_btn)
 
-        control_group.setLayout(control_layout)
-
-     
-        
         control_group.setLayout(control_layout)
         
         # Add all groups to left panel
@@ -310,24 +317,55 @@ class ElectrochemicalApp(QMainWindow):
             if 'x' in new_data and 'y' in new_data:
                 self.current_data['voltage'].append(float(new_data['x'][0]))
                 self.current_data['current'].append(float(new_data['y'][0]))
-            
+                self.all_measurements.append(self.current_data)
             # Update plot
             self.update_plot()
-            
             # Update data display
             self.update_data_display()
             
         except Exception as e:
             self.statusBar.showMessage(f"Error in data callback: {str(e)}")
-
     def update_plot(self):
         try:
-            self.ax.clear()
-            self.ax.plot(self.current_data['voltage'], self.current_data['current'])
+            self.ax.clear()  # Clear the axes for a fresh start
+
+            # # 1. Plot the most recent "Current Scan"
+            # if self.current_data['voltage'] and self.current_data['current']:
+            #     self.ax.plot(self.current_data['voltage'], 
+            #                 self.current_data['current'], 
+            #                 color='red', 
+            #                 label='Current Scan')  
+
+            if self.measurement_type_combo.currentText() == "New":
+                if self.current_data['voltage'] and self.current_data['current']:
+                    self.ax.plot(self.current_data['voltage'], 
+                            self.current_data['current'], 
+                            color='red', 
+                            label='Current Scan')
+            # 2. Plot previously stored measurements
+                # (c) If it's a "New" measurement, clear the previous plot 
+            else:
+                for i, data in enumerate(self.all_measurements):
+                # (a) Check if it's an overlay:
+                    # (b)  Use a color cycle
+                    self.ax.plot(data['voltage'], data['current'], color=self.get_color(i) , label=f'Scan {i+1}')  
+                    # # (d) The previous plot was replaced
+                    # self.all_measurements = [data] # clear the list and only append the lastest scan
+                    # # (e) Update the plot for the new measurement
+                    # self.ax.plot(data['voltage'], data['current'], color='green', label=f'Scan {i+1}')  
+                    # self.update_plot()
+
+            # 3.  Set labels and grid
             self.ax.set_xlabel('Potential (V)')
             self.ax.set_ylabel('Current (A)')
             self.ax.grid(True)
-            self.canvas.draw()
+
+            # 4. Add a legend
+            handles, labels = self.ax.get_legend_handles_labels()
+            if handles:  # Check if there are any handles to display
+                self.ax.legend(handles, labels)
+
+            self.canvas.draw()  # Redraw the canvas to update the plot
         except Exception as e:
             self.statusBar.showMessage(f"Error updating plot: {str(e)}")
 
@@ -401,9 +439,27 @@ class ElectrochemicalApp(QMainWindow):
 
         # Predict concentration using the model
         concentration_pred = model.predict(feature_array)
+# Determine creatinine level category
+        if concentration_pred[0] < 5:
+            level = "Very Low"
+        elif 5 <= concentration_pred[0] < 30:
+            level = "Low"
+        elif 30 <= concentration_pred[0] < 60:
+            level = "Moderate"
+        elif 60 <= concentration_pred[0] < 90:
+            level = "High"
+        elif 90 <= concentration_pred[0] <= 120:
+            level = "Very High"
+        else:
+            level = "Extremely High"
 
-        # Display the predicted concentration
-        QMessageBox.information(self, "Result", f"Predicted Concentration: {concentration_pred[0]:.4f} µM ")
+        # Show results in QMessageBox
+        QMessageBox.information(
+            None, 
+            "Prediction Result", 
+            f"Predicted Concentration: {concentration_pred[0]:.4f} µM\nCreatinine Level: {level}"
+        )
+
     def predict_concentration(self):
         # Ensure there is data to predict
         if not self.current_data['voltage'] or not self.current_data['current']:
@@ -495,26 +551,33 @@ class ElectrochemicalApp(QMainWindow):
             self.statusBar.showMessage(f"Error stopping measurement: {str(e)}")
     # Add this method to the ElectrochemicalApp class
     def start_new_measurement(self):
-    # Prompt user to save current scan data
-        reply = QMessageBox.question(self, "Save Data",
-                                    "Do you want to save the current scan data?",
-                                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
-                                    QMessageBox.Cancel)
+        # Check the selected measurement type
+        measurement_type = self.measurement_type_combo.currentText()
         
-        if reply == QMessageBox.Yes:
-            self.save_data()  # Call the save_data method to save the current data
-        elif reply == QMessageBox.Cancel:
-            return  # If user cancels, do nothing and return
+        if measurement_type == "New":
+            # Prompt user to save current scan data
+            reply = QMessageBox.question(self, "Save Data",
+                                        "Do you want to save the current scan data?",
+                                        QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                                        QMessageBox.Cancel)
+            
+            if reply == QMessageBox.Yes:
+                self.save_data()  # Call the save_data method to save the current data
+            elif reply == QMessageBox.Cancel:
+                return  # If user cancels, do nothing and return
 
-        # Clear previous data
-        self.current_data = {'voltage': [], 'current': []}
-        self.update_plot()  # Update the plot to reflect the cleared data
-        self.update_data_display()  # Clear the data display
-        self.statusBar.showMessage("Ready for new measurement")
-
-        # Reset button states
-        self.start_btn.setEnabled(True)
-        self.stop_btn.setEnabled(False)  # Disable stop button since no measurement is ongoing
+            # Clear previous data
+            self.current_data = {'voltage': [], 'current': []}
+            self.update_plot()  # Update the plot to reflect the cleared data
+            self.update_data_display()  # Clear the data display
+            self.statusBar.showMessage("Ready for new measurement")
+        
+        elif measurement_type == "Overlay":
+            # Do not clear previous data, just prepare for overlay
+            self.statusBar.showMessage("Ready to overlay new measurement")
+            # Reset button states
+            self.start_btn.setEnabled(True)
+            self.stop_btn.setEnabled(False)  # Disable stop button since no measurement is ongoing
 
         # In the create_left_panel method, add the new button
              
@@ -554,6 +617,7 @@ class ElectrochemicalApp(QMainWindow):
             16.568925, 16.747426, 16.803424, 17.020424, 17.349422, 17.60142, 17.877918,
     18.374918
         ]
+        
         self.current_data = {'voltage': voltage, 'current': current}
     
         # Update plot and data display
@@ -583,10 +647,20 @@ class ElectrochemicalApp(QMainWindow):
             )
             if filename:
                 df = pd.read_csv(filename)
+                new_voltage = df['Voltage (V)'].tolist()
+                new_current = df['Current (A)'].tolist()
+
                 self.current_data = {
-                    'voltage': df['Voltage (V)'].tolist(),
-                    'current': df['Current (A)'].tolist()
-                }
+                        'voltage': new_voltage,
+                        'current': new_current
+                    }
+
+                if self.measurement_type_combo.currentText() == "Overlay":
+                    # Append new data to existing data
+                    self.all_measurements.append(self.current_data)
+                    
+
+                # Update plot and data display
                 self.update_plot()
                 self.update_data_display()
                 self.statusBar.showMessage(f"Data loaded from {filename}")
@@ -651,7 +725,6 @@ class ElectrochemicalApp(QMainWindow):
             event.accept()
     def load_model(self):
     # Load the trained model, polynomial features, and scaler
-        
         model = joblib.load('rf_model.pkl')  # Ensure this file is in the same directory as main.py
         poly = joblib.load('poly.pkl')
         scaler = joblib.load('scaler.pkl')
